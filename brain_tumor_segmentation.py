@@ -127,6 +127,7 @@ def image_segmentation_using_otsu_threshold(image, offset=110):
     segmented_image = cv2.bitwise_and(segmented_image, segmented_image, mask)
     return segmented_image
 
+
 def predict_tumor_segmentation(image, **kwargs):
     segmented_image = image_segmentation_using_otsu_threshold(image, **kwargs)
     # Find contours in the segmented image
@@ -153,6 +154,18 @@ def predict_tumor_segmentation(image, **kwargs):
     return is_tumor_detected, contours_inside_roi, contours_inside_roi_mask, result_image
 
 
+def calculate_roi_size(segmented_image):
+    # Assuming segmented_image is your segmented image
+    height, width = segmented_image.shape[:2]
+
+    # Create a binary mask for pixels with value 255
+    mask_255 = (segmented_image == 255).astype(np.uint8)
+
+    # Calculate the total area with pixel value 255
+    total_area_255 = np.sum(mask_255)
+    return total_area_255
+
+
 def parse_args():
     parser = argparse.ArgumentParser(description="Brain Tumor Segmentation")
     parser.add_argument("-d", "--directory", required=True, type=str,
@@ -165,6 +178,8 @@ def parse_args():
 if __name__ == "__main__":
     args = parse_args()
     
+    os.makedirs(args.target_directory, exist_ok=True)
+
     list_read_img = []
     list_img_names = []
 
@@ -180,6 +195,7 @@ if __name__ == "__main__":
             img = cv2.imread(img_path)
         list_read_img.append(img)
     result_tumor_prediction = []
+    result_estimated_tumor_size = []
     kwargs = {
         "offset": 90
     }
@@ -188,11 +204,15 @@ if __name__ == "__main__":
         is_tumor_detected, _, contours_inside_roi_mask, result_image = predict_tumor_segmentation(img, **kwargs)
         is_tumor_detected = 1 if is_tumor_detected else 0
         result_tumor_prediction.append(is_tumor_detected)
+        result_estimated_tumor_size.append(calculate_roi_size(contours_inside_roi_mask))
         #Extract the tumor image from the original image
         extracted_tumor_img = cv2.bitwise_and(img, img, mask=contours_inside_roi_mask)
+        cv2.imwrite(os.path.join(args.target_directory, f"{img_name}_extracted_tumor_img.bmp"), extracted_tumor_img)
+        cv2.imwrite(os.path.join(args.target_directory, f"{img_name}_pred_result.bmp"), result_image)
+
     
     df = pd.DataFrame(
-    {"Filename": list_img_names, "Result Prediction": result_tumor_prediction}
+    {"Filename": list_img_names, "Result Prediction": result_tumor_prediction, "Total area size (px)": result_estimated_tumor_size}
     )
 
     df.to_csv("result_prediction.csv", index=False)
