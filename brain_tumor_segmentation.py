@@ -1,12 +1,13 @@
-import argparse
-import glob
-import os
+import argparse # Argument parser
+import glob # Read File dalem directory
+import os # Basic operating System
 
-import cv2
-import pydicom
-import numpy as np
-import matplotlib.pyplot as plt
-import pandas as pd
+# Lib untuk Image Segmentation
+import cv2  # OpenCV untuk Image Processing
+import pydicom # Read .dcm img
+import numpy as np # Numerical Python
+import matplotlib.pyplot as plt # Plot
+import pandas as pd # buat tabel
 
 
 IMG_MIMETYPES = [".bmp", ".dcm"]
@@ -207,6 +208,8 @@ if __name__ == "__main__":
         result_estimated_tumor_size.append(calculate_roi_size(contours_inside_roi_mask))
         #Extract the tumor image from the original image
         extracted_tumor_img = cv2.bitwise_and(img, img, mask=contours_inside_roi_mask)
+        # Save Image
+        img_name = img_name.split(".")[0]
         cv2.imwrite(os.path.join(args.target_directory, f"{img_name}_extracted_tumor_img.bmp"), extracted_tumor_img)
         cv2.imwrite(os.path.join(args.target_directory, f"{img_name}_pred_result.bmp"), result_image)
 
