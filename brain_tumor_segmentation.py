@@ -42,12 +42,13 @@ def plot_img(img, title="Image", cmap="gray"):
 def find_roi_bbox_around_centers(contours, img_shape, sort_roi=False):
     # Get the center of the image
     center_x, center_y = img_shape[1] // 2, img_shape[0] // 2
-    approx_start_x, approx_start_y = 0.35 * center_x, 0.45 * center_y
+    approx_start_x, approx_start_y = 0.4 * center_x, 0.50 * center_y
 
     # Initialize variables for top-left and bottom-right corners around the center
-    centered_top_left_min = (float('inf'), float('inf'))
-    centered_bottom_right_max = (0, 0)
-
+    centered_top_left_min = (int(center_x - approx_start_x), int(center_y - approx_start_y)) # x, y
+    centered_bottom_right_max = (int(center_x + approx_start_x), int(center_y + approx_start_y))
+    constrain_top_left_min = centered_top_left_min
+    constrain_bottom_right_max = centered_bottom_right_max
     if sort_roi:
         sorted(contours, key=cv2.contourArea, reverse=True)
 
@@ -57,12 +58,13 @@ def find_roi_bbox_around_centers(contours, img_shape, sort_roi=False):
         x, y, w, h = cv2.boundingRect(contour)
 
         # Check if the contour is around the center of the image
-        if center_x - approx_start_x < x < center_x + approx_start_x // 2 \
-            and center_y - approx_start_y < y < center_y + approx_start_y:
+        if centered_top_left_min[0] < x < centered_bottom_right_max[0] \
+            and centered_top_left_min[1] < y < centered_bottom_right_max[1]:
             # Update the top-left corner around the center
             centered_top_left_min = (min(centered_top_left_min[0], x), min(centered_top_left_min[1], y))
-            # Update the bottom-right corner around the center
-            centered_bottom_right_max = (max(centered_bottom_right_max[0], x + w), max(centered_bottom_right_max[1], y + h))
+            if x + h < constrain_bottom_right_max[0] and y + h < centered_bottom_right_max[1]:
+                # Update the bottom-right corner around the center
+                centered_bottom_right_max = (max(centered_bottom_right_max[0], x + w), max(centered_bottom_right_max[1], y + h))
     return centered_top_left_min[0], centered_top_left_min[1], centered_bottom_right_max[0], centered_bottom_right_max[1]
 
 
@@ -85,6 +87,8 @@ def is_contour_inside_roi(contour, roi_area) -> bool:
 def find_otsu_thresholding(image, is_normalized=False, bins_num=256):
     # Get the image histogram
     hist, bin_edges = np.histogram(image, bins=bins_num)
+    # print(bin_edges)
+    # print(hist)
     
     # Get normalized histogram if it is required
     if is_normalized:
@@ -111,28 +115,30 @@ def find_otsu_thresholding(image, is_normalized=False, bins_num=256):
     return threshold
 
 
-def image_segmentation_using_otsu_threshold(image, offset=110):
+def image_segmentation_using_otsu_threshold(image, offset=80):
     if len(image.shape) > 2:
         # Convert the image to grayscale
         image = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
     
-    # Check dark points. Take out pixel value < 5
-    mask = (image > 5).astype(np.uint8) * 255
-
     # otsu thresholding
     otsu_threshold = find_otsu_thresholding(image)
-
+    if otsu_threshold < 45:
+        otsu_threshold += offset
+    elif otsu_threshold >= 45 and otsu_threshold < 65:
+        otsu_threshold += 50
+    
+    print("Otsu Threshold:", otsu_threshold)
+    
     # Apply Otsu's thresholding
-    _, segmented_image = cv2.threshold(image, offset + otsu_threshold, 255, cv2.THRESH_BINARY)
-    print(otsu_threshold)
-    segmented_image = cv2.bitwise_and(segmented_image, segmented_image, mask)
+    _, segmented_image = cv2.threshold(image, otsu_threshold, 255, cv2.THRESH_BINARY)
+    # segmented_image = cv2.bitwise_and(segmented_image, segmented_image, mask)
     return segmented_image
 
 
 def predict_tumor_segmentation(image, **kwargs):
     segmented_image = image_segmentation_using_otsu_threshold(image, **kwargs)
     # Find contours in the segmented image
-    contours, _ = cv2.findContours(segmented_image, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    contours, _ = cv2.findContours(segmented_image, cv2.RETR_TREE, cv2.CHAIN_APPROX_NONE)
     sorted(contours, key=cv2.contourArea, reverse=True)
     roi_area = find_roi_bbox_around_centers(contours, image.shape, sort_roi=False)
 
@@ -180,6 +186,8 @@ if __name__ == "__main__":
     args = parse_args()
     
     os.makedirs(args.target_directory, exist_ok=True)
+    result_image_dir = os.path.join(args.target_directory, "result_images")
+    os.makedirs(result_image_dir, exist_ok=True)
 
     list_read_img = []
     list_img_names = []
@@ -194,11 +202,12 @@ if __name__ == "__main__":
             img = read_dcm_images(img_path)
         else:
             img = cv2.imread(img_path)
+        img = cv2.resize(img, (256, 256))
         list_read_img.append(img)
     result_tumor_prediction = []
     result_estimated_tumor_size = []
     kwargs = {
-        "offset": 90
+        "offset": 80
     }
 
     for img_name, img in zip(list_img_names, list_read_img):
@@ -210,13 +219,12 @@ if __name__ == "__main__":
         extracted_tumor_img = cv2.bitwise_and(img, img, mask=contours_inside_roi_mask)
         # Save Image
         img_name = img_name.split(".")[0]
-        cv2.imwrite(os.path.join(args.target_directory, f"{img_name}_extracted_tumor_img.bmp"), extracted_tumor_img)
-        cv2.imwrite(os.path.join(args.target_directory, f"{img_name}_pred_result.bmp"), result_image)
+        cv2.imwrite(os.path.join(result_image_dir, f"{img_name}_extracted_tumor_img.bmp"), extracted_tumor_img)
+        cv2.imwrite(os.path.join(result_image_dir, f"{img_name}_pred_result.bmp"), result_image)
 
-    
     df = pd.DataFrame(
     {"Filename": list_img_names, "Result Prediction": result_tumor_prediction, "Total area size (px)": result_estimated_tumor_size}
     )
 
-    df.to_csv("result_prediction.csv", index=False)
+    df.to_csv(os.path.join(args.target_directory, "result_prediction.csv"), index=False)
 
